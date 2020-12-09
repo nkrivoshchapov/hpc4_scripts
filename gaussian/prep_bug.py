@@ -39,7 +39,7 @@ while len(docalc) > 0:
         runcalc(docalc[rank].replace("\n",""))
     time.sleep(10)
     for line in docalc:
-        if os.path.isfile(line.replace("gjf","log").replace("\n","")) or os.path.isfile(line.replace("gjf","2ordernbo").replace("\n","")):
+        if os.path.isfile(line.replace("gjf","log").replace("\n","")):
             docalc.remove(line)
 
 

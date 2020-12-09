@@ -4,7 +4,7 @@ module load intel-compilers
 mpicxx prog2.cpp -o prog2.out
 ```
 
-Set paths to Gaussian, Xtb+Crest or MRCC in \*.x file.
+! Set the right path to Gaussian, Xtb+Crest or MRCC in \*.x file.
 
 Run Gaussian calculations on several nodes:
 1. Create do_calc.dat file containing relative paths to gjf files:
@@ -22,7 +22,14 @@ do_calc.dat should be in ~/ along with calc.sh, prog2.out and python-script.
 $MPIRUN -n 8 `pwd`/prog2.out   # 1 calculation (python-script) per node
 ```
 
-3. Submit the job to Slurm:
+3. Set the number of threads for Gaussian calculations in python-script:
+```
+...
+proc=16
+...
+```
+
+4. Submit the job to Slurm:
 ```
 sbatch calc.sh
 ```
