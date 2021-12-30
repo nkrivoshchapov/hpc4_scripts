@@ -1,0 +1,58 @@
+#!/usr/bin/python
+import sys, os, random, ntpath
+from copy import deepcopy
+
+sbatch_str = '''\
+#!/bin/sh
+#SBATCH -J {jobname}
+#SBATCH -D {pwd}
+#SBATCH -o {jobname}.out
+#SBATCH -e {jobname}.err
+#SBATCH -t 3-00:00:00
+#SBATCH -p {partition}
+#SBATCH --cpus-per-task={nproc}
+#SBATCH -N 1
+{gpu_flag}
+
+export PATH=$PATH:/s/ls4/groups/g0130/knv_bin/xtb/build
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/s/ls4/groups/g0130/knv_bin/xtb/build
+module load intel-parallel-studio/2017 gcc/10.2.0
+{xtb_runline}
+'''
+runline_template = "/s/ls4/groups/g0130/knv_bin/xtb/build/xtb {inpfile} {flags} {extra_flags}"
+extra_flags = []
+
+args = deepcopy(sys.argv)
+if args[1] == "--gpu":
+    partition = "hpc5-gpu-3d"
+    gpu_flag = "#SBATCH --gres=gpu:1"
+    maxproc = 16
+    args.remove("--gpu")
+else:
+    partition = "hpc4-3d"
+    gpu_flag = ""
+    maxproc = 48
+
+if "-P" in sys.argv:
+    nproc = int(sys.argv[sys.argv.index("-P") + 1])
+    assert nproc <= maxproc, "Number of threads must be %d or less" % maxproc
+else:
+    nproc = 1
+    extra_flags.append("-P %d" % nproc)
+
+xtb_runline = runline_template.format(inpfile=args[1],
+                                      flags=' '.join(args[2:]),
+                                      extra_flags=' '.join(extra_flags))
+print("XTB Execution line: " + xtb_runline)
+
+sbatch_filename = "/tmp/slurm-%d" % random.randint(0, 10000000)
+with open(sbatch_filename, "w") as f:
+    f.write(sbatch_str.format(jobname=ntpath.basename(args[1]).replace(".xyz", ""),
+                                  pwd=os.getcwd(),
+                                  xtb_runline=xtb_runline,
+                                  nproc=nproc,
+                                  partition=partition,
+                                  gpu_flag=gpu_flag))
+os.system("sbatch " + sbatch_filename)
+os.remove(sbatch_filename)
+

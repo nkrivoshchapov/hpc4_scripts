@@ -1,0 +1,121 @@
+#!/usr/bin/python
+import sys, os, random, ntpath, glob
+from copy import deepcopy
+
+sbatch_str = '''\
+#!/bin/sh
+#SBATCH -J {jobname}
+#SBATCH -D {wd}
+#SBATCH -o {jobname}.out
+#SBATCH -e {jobname}.err
+#SBATCH -t 3-00:00:00
+#SBATCH -p {partition}
+#SBATCH --cpus-per-task={maxproc}
+#SBATCH -N {node_count}
+{gpu_flag}
+
+module load intel-compilers
+$MPIRUN -n {num_threads} /s/ls4/groups/g0130/knv_bin/gaussian_parallel/calcdriver.exe {calclistfile} {rung_script}
+echo "Quitting"
+'''
+
+args = deepcopy(sys.argv[1:])
+if "--gpu" in args:
+    partition = "hpc5-gpu-3d"
+    gpu_flag = "#SBATCH --gres=gpu:1"
+    rung_script = "/s/ls4/groups/g0130/knv_bin/gaussian_parallel/rung_sse"
+    maxproc = 16
+    args.remove("--gpu")
+else:
+    partition = "hpc4-3d"
+    gpu_flag = ""
+    rung_script = "/s/ls4/groups/g0130/knv_bin/gaussian_parallel/rung_avx"
+    maxproc = 48
+
+if "--mt" in args:
+    mt = True
+    args.remove("--mt")
+else:
+    mt = False
+
+if "-j" in args:
+    jobname = args[args.index("-j") + 1]
+    del args[args.index("-j") + 1]
+    args.remove("-j")
+else:
+    dirs = os.getcwd().split("/")
+    jobname = "_".join(dirs[dirs.index("users") + 1 : ])
+
+assert "-N" in args, "Use -N flag to define the number of nodes"
+node_count = int(args[args.index("-N") + 1])
+del args[args.index("-N") + 1]
+args.remove("-N")
+
+if "--cpn" in args:
+    calcs_per_node = int(args[args.index("--cpn") + 1])
+    del args[args.index("--cpn") + 1]
+    args.remove("--cpn")
+else:
+    calcs_per_node = 1
+assert maxproc % calcs_per_node == 0, "Number of threads must be a multiple of number of calcs per node"
+num_threads = calcs_per_node * node_count
+
+docalc_files = []
+def add_dat(datfile):
+    global docalc_files
+    lines = open(datfile, "r").readlines()
+    for line in lines:
+        newfile = line.replace("\n", "")
+        assert newfile.endswith(".gjf"), "File %s declared in %s does not have .gjf extension" % (newfile, datfile)
+        assert os.path.isfile(newfile), "File %s declared in %s does not exist" % (newfile, datfile)
+        docalc_files.append(newfile)
+
+def add_gjf(gjffile, argument):
+    global docalc_files
+    docalc_files.append(gjffile)
+
+print("Checking out the following files (masks): " + repr(args))
+for item in args:
+    if item.endswith(".dat"):
+        add_dat(item)
+    else:
+        for file in glob.glob(item):
+            if file.endswith(".gjf"):
+                add_gjf(file, item)
+
+for file in docalc_files:
+    gjflines = open(file, "r").readlines()
+    for i, line in enumerate(gjflines):
+        if "%nproc" in line.lower():
+            del gjflines[i]
+            break
+    nprocshared = int(maxproc / calcs_per_node)
+    if not mt:
+        nprocshared = int(nprocshared / 2)
+    gjflines.insert(0, "%%nprocshared=%d\n" % nprocshared)
+    with open(file, "w") as f:
+        f.write("".join(gjflines))
+
+runid = random.randint(0,10000000)
+docalc_filename = "./docalc_%d.dat" % runid
+with open(docalc_filename, "w") as f:
+    f.write("\n".join(docalc_files) + "\n")
+
+if num_threads - 1 > len(docalc_files):
+    num_threads = len(docalc_files) + 1
+
+sbatch_filename = "./slurm-%d" % runid
+with open(sbatch_filename, "w") as f:
+    f.write(sbatch_str.format(jobname=jobname,
+                              wd=os.getcwd(),
+                              maxproc=maxproc,
+                              node_count=node_count,
+                              num_threads=num_threads, # Workers + one master thread
+                              calclistfile=docalc_filename,
+                              partition=partition,
+                              gpu_flag=gpu_flag,
+                              rung_script=rung_script))
+os.system("sbatch " + sbatch_filename)
+#os.remove(sbatch_filename)
+#print(sbatch_filename)
+
